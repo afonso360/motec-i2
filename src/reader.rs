@@ -1,4 +1,4 @@
-use crate::{ChannelMetadata, Datatype, Header, I2Error, I2Result, ProLogging};
+use crate::{ChannelMetadata, Datatype, Header, I2Error, I2Result, ProLogging, Sample};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{Read, Seek, SeekFrom};
 use std::{io, iter};
@@ -187,8 +187,36 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
         })
     }
 
+    // TODO: We should probably have a iterator over channel data
+
     /// Returns a iterator over the channel data
-    // pub fn channel_iter(&mut self, channel: &ChannelMetadata) -> I2Result<ChannelIter> {}
+    pub fn channel_data(&mut self, channel: &ChannelMetadata) -> I2Result<Vec<Sample>> {
+        self.source
+            .seek(SeekFrom::Start(channel.data_addr as u64))?;
+
+        // Data for a channel is stored in a contiguous manner at the addr ptr
+        let data = (0..channel.data_count)
+            .map(|_| {
+                Ok({
+                    match channel.datatype {
+                        Datatype::Beacon16 | Datatype::I16 => {
+                            Sample::I16(self.source.read_i16::<LittleEndian>()?)
+                        }
+                        Datatype::Beacon32 | Datatype::I32 => {
+                            Sample::I32(self.source.read_i32::<LittleEndian>()?)
+                        }
+
+                        Datatype::F16 => unimplemented!("Reading f16 samples unimplemented"),
+                        Datatype::F32 => Sample::F32(self.source.read_f32::<LittleEndian>()?),
+                    }
+                })
+            })
+            .collect::<I2Result<Vec<_>>>()?; // .map(|sample| sample.map(|sample| {
+                                             //     sample / scale *
+                                             // }))
+
+        Ok(data)
+    }
 
     fn read_bytes(&mut self, size: usize) -> io::Result<Vec<u8>> {
         let mut bytes: Vec<u8> = iter::repeat(0u8).take(size).collect();
@@ -212,7 +240,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 #[cfg(test)]
 mod tests {
     use crate::reader::LDReader;
-    use crate::{ChannelMetadata, Datatype, Header, ProLogging};
+    use crate::{ChannelMetadata, Datatype, Header, ProLogging, Sample};
     use std::fs;
     use std::io::Cursor;
 
@@ -309,5 +337,28 @@ mod tests {
                 unit: "deg".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn read_sample1_channel_data() {
+        let bytes = fs::read("./samples/Sample1.ld").unwrap();
+        let mut cursor = Cursor::new(bytes);
+        let mut reader = LDReader::new(&mut cursor);
+
+        let channels = reader.read_channels().unwrap();
+
+        let data = reader.channel_data(&channels[0]).unwrap();
+        let data: Vec<_> = data.into_iter().take(5).collect();
+
+        assert_eq!(
+            data,
+            vec![
+                Sample::I16(199),
+                Sample::I16(199),
+                Sample::I16(201),
+                Sample::I16(199),
+                Sample::I16(199),
+            ]
+        )
     }
 }

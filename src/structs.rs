@@ -33,6 +33,13 @@ pub struct Header {
     pub(crate) pro_logging: ProLogging,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Sample {
+    I16(i16),
+    I32(i32),
+    F32(f32),
+}
+
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Datatype {
     // TODO: Not Too sure about this data type, it shows up as beacon in the sample dataset
@@ -48,6 +55,14 @@ pub enum Datatype {
 }
 
 impl Datatype {
+    /// Size in bytes that this datatype occupies on file
+    pub fn size(&self) -> usize {
+        match self {
+            Datatype::Beacon16 | Datatype::I16 | Datatype::F16 => 2,
+            Datatype::Beacon32 | Datatype::I32 | Datatype::F32 => 4,
+        }
+    }
+
     pub fn from_type_and_size(_type: u16, size: u16) -> I2Result<Self> {
         match (_type, size) {
             (0, 2) => Ok(Datatype::Beacon16),
