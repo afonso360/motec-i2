@@ -40,6 +40,22 @@ pub enum Sample {
     F32(f32),
 }
 
+impl Sample {
+    /// Calculates the final value of this sample as a f64
+    pub fn decode_f64(&self, channel: &ChannelMetadata) -> f64 {
+        let value = match self {
+            Sample::I16(v) => *v as f64,
+            Sample::I32(v) => *v as f64,
+            Sample::F32(v) => *v as f64,
+        };
+
+        let value = value / channel.scale as f64;
+        let value = value * (10.0f64.powi(-channel.dec_places as i32) * (channel.shift as f64));
+        let value = value * channel.mul as f64;
+        value
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum Datatype {
     // TODO: Not Too sure about this data type, it shows up as beacon in the sample dataset
@@ -52,6 +68,8 @@ pub enum Datatype {
 
     F16,
     F32,
+
+    Invalid,
 }
 
 impl Datatype {
@@ -60,6 +78,9 @@ impl Datatype {
         match self {
             Datatype::Beacon16 | Datatype::I16 | Datatype::F16 => 2,
             Datatype::Beacon32 | Datatype::I32 | Datatype::F32 => 4,
+
+            // We really don't know what these values are
+            Datatype::Invalid => 0,
         }
     }
 
@@ -69,8 +90,18 @@ impl Datatype {
             (0, 4) => Ok(Datatype::Beacon32),
             (3, 2) => Ok(Datatype::I16),
             (3, 4) => Ok(Datatype::I32),
+            // 20160903-0051401.ld uses 5 for ints?
+            (5, 2) => Ok(Datatype::I16),
+            (5, 4) => Ok(Datatype::I32),
             (7, 2) => Ok(Datatype::F16),
             (7, 4) => Ok(Datatype::F32),
+
+            // The mu iracing exporter exports these values on Damper Pos FL/FR/RL, they have 0 samples
+            (17536, 5) | (6566, 5) | (29813, 5) => Ok(Datatype::Invalid),
+            // This should be Beacon40 ?, but the iRacing mu exporter puts this in Damper Pos RR
+            (0, 5) => Ok(Datatype::Invalid),
+            // Iracing mu exporter Ride Height Center 0 samples
+            (15, 5) => Ok(Datatype::Invalid),
             _ => Err(I2Error::UnrecognizedDatatype { _type, size }),
         }
     }

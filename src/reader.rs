@@ -43,7 +43,9 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
         let event_ptr = self.source.read_u32::<LittleEndian>()?;
 
         let mut _unknown = self.read_bytes(24)?;
-        assert_eq!(_unknown, [0u8; 24]);
+
+        // Not 0 in 20160903-0051401.ld
+        // assert_eq!(_unknown, [0u8; 24]);
 
         // TODO: These may not actually be const...
         let unknown_const_1 = self.source.read_u16::<LittleEndian>()?;
@@ -208,12 +210,14 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 
                         Datatype::F16 => unimplemented!("Reading f16 samples unimplemented"),
                         Datatype::F32 => Sample::F32(self.source.read_f32::<LittleEndian>()?),
+                        Datatype::Invalid => panic!(
+                            "Tried to read invalid datatype from channel: {}",
+                            channel.name
+                        ),
                     }
                 })
             })
-            .collect::<I2Result<Vec<_>>>()?; // .map(|sample| sample.map(|sample| {
-                                             //     sample / scale *
-                                             // }))
+            .collect::<I2Result<Vec<_>>>()?;
 
         Ok(data)
     }
@@ -339,6 +343,14 @@ mod tests {
         );
     }
 
+    macro_rules! assert_delta {
+        ($x:expr, $y:expr, $d:expr) => {
+            if !($x - $y < $d || $y - $x < $d) {
+                panic!();
+            }
+        };
+    }
+
     #[test]
     fn read_sample1_channel_data() {
         let bytes = fs::read("./samples/Sample1.ld").unwrap();
@@ -346,8 +358,9 @@ mod tests {
         let mut reader = LDReader::new(&mut cursor);
 
         let channels = reader.read_channels().unwrap();
+        let channel = &channels[0];
 
-        let data = reader.channel_data(&channels[0]).unwrap();
+        let data = reader.channel_data(channel).unwrap();
         let data: Vec<_> = data.into_iter().take(5).collect();
 
         assert_eq!(
@@ -359,6 +372,12 @@ mod tests {
                 Sample::I16(199),
                 Sample::I16(199),
             ]
-        )
+        );
+
+        assert_delta!(data[0].decode_f64(channel), 19.9, 0.000001);
+        assert_delta!(data[1].decode_f64(channel), 19.9, 0.000001);
+        assert_delta!(data[2].decode_f64(channel), 20.1, 0.000001);
+        assert_delta!(data[3].decode_f64(channel), 19.9, 0.000001);
+        assert_delta!(data[4].decode_f64(channel), 19.9, 0.000001);
     }
 }
