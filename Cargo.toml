@@ -2,7 +2,13 @@
 name = "motec-i2"
 version = "0.1.0"
 edition = "2018"
+authors = ["Afonso Bordado <afonsobordado@az8.co>"]
+homepage = "https://github.com/afonso360/motec-i2"
+repository = "https://github.com/afonso360/motec-i2"
 description = "MoTeC i2 file format parser"
+keywords = ["parser", "file"]
+categories = ["data-structures", "parser-implementations"]
+readme = "README.md"
 license = "MIT"
 
 [dependencies]

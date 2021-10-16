@@ -11,7 +11,7 @@ cargo run --example write
 ## Features
 
 - [x] Parsing ld files
-- [ ] Writing ld files
+- [x] Writing ld files
 - [ ] Parsing ldx files
 - [ ] Writing ldx files
 
