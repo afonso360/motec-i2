@@ -32,6 +32,7 @@ fn main() -> I2Result<()> {
         "Reading channel 0: {} ({} samples at {} Hz)",
         channel.name, channel.data_count, channel.sample_rate
     );
+    println!("Channle: {:#?}", channel);
 
     let data = reader.channel_data(channel)?;
     for i in 0..6 {

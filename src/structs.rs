@@ -69,13 +69,22 @@ pub enum Datatype {
 
 impl Datatype {
     /// Size in bytes that this datatype occupies on file
-    pub fn size(&self) -> usize {
+    pub fn size(&self) -> u16 {
         match self {
             Datatype::Beacon16 | Datatype::I16 | Datatype::F16 => 2,
             Datatype::Beacon32 | Datatype::I32 | Datatype::F32 => 4,
 
             // We really don't know what these values are
             Datatype::Invalid => 0,
+        }
+    }
+
+    pub fn _type(&self) -> u16 {
+        match self {
+            Datatype::Beacon16 | Datatype::Beacon32 => 0,
+            Datatype::I16 | Datatype::I32 => 3,
+            Datatype::F16 | Datatype::F32 => 7,
+            Datatype::Invalid => 999,
         }
     }
 
@@ -124,6 +133,16 @@ pub struct ChannelMetadata {
     pub name: String,
     pub short_name: String,
     pub unit: String,
+}
+
+impl ChannelMetadata {
+    /// Size of a metadata entry in bytes
+    pub(crate) const ENTRY_SIZE: u32 = 124;
+
+    /// Calculates the size in bytes of the data section for this channel
+    pub(crate) fn data_size(&self) -> u32 {
+        self.data_count * self.datatype.size() as u32
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]

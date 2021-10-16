@@ -1,5 +1,5 @@
 use crate::full_header::FULL_HEADER;
-use crate::{Header, I2Result, LD_HEADER_MARKER};
+use crate::{ChannelMetadata, Header, I2Result, Sample, LD_HEADER_MARKER};
 use byteorder::{LittleEndian, WriteBytesExt};
 use core::iter;
 use std::io::{Seek, SeekFrom, Write};
@@ -163,6 +163,79 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
         Ok(())
     }
 
+    pub fn write_channels(
+        &mut self,
+        channels: Vec<(ChannelMetadata, Vec<Sample>)>,
+    ) -> I2Result<()> {
+        // TODO: Should not be hardcoded
+        self.sink.seek(SeekFrom::Start(0x3448))?;
+
+        for i in 0..channels.len() {
+            let (meta, samples) = &channels[i];
+            let mut meta = meta.clone();
+            let i = i as u32;
+
+            meta.prev_addr = i * ChannelMetadata::ENTRY_SIZE;
+            meta.next_addr = ((i + 1) % (channels.len() as u32)) * ChannelMetadata::ENTRY_SIZE;
+            meta.data_count = samples.len() as u32;
+
+            let header_offset = 0x3448;
+            let meta_offset = channels.len() as u32 * ChannelMetadata::ENTRY_SIZE;
+            let data_offset: u32 = channels.iter().map(|(c, _)| c.data_size()).sum();
+            meta.data_addr = header_offset + meta_offset + data_offset;
+
+            self.write_channel_metadata(&meta)?;
+            self.write_samples(meta.data_addr, samples)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_channel_metadata(&mut self, channel: &ChannelMetadata) -> I2Result<()> {
+        self.sink.write_u32::<LittleEndian>(channel.prev_addr)?;
+        self.sink.write_u32::<LittleEndian>(channel.next_addr)?;
+        self.sink.write_u32::<LittleEndian>(channel.data_addr)?;
+        self.sink.write_u32::<LittleEndian>(channel.data_count)?;
+
+        // TODO: Not sure what this is...
+        self.sink.write_u16::<LittleEndian>(4u16)?;
+
+        self.sink
+            .write_u16::<LittleEndian>(channel.datatype._type())?;
+        self.sink
+            .write_u16::<LittleEndian>(channel.datatype.size())?;
+
+        self.sink.write_u16::<LittleEndian>(channel.sample_rate)?;
+
+        self.sink.write_u16::<LittleEndian>(channel.shift)?;
+        self.sink.write_u16::<LittleEndian>(channel.mul)?;
+        self.sink.write_u16::<LittleEndian>(channel.scale)?;
+        self.sink.write_i16::<LittleEndian>(channel.dec_places)?;
+
+        self.write_string(32, &channel.name)?;
+        self.write_string(8, &channel.short_name)?;
+        self.write_string(12, &channel.unit)?;
+
+        // TODO: Not sure what this is...
+        self.sink.write_u8(201)?;
+        self.sink.write(&[0u8; 39])?;
+        Ok(())
+    }
+
+    fn write_samples(&mut self, addr: u32, sample: &Vec<Sample>) -> I2Result<()> {
+        self.sink.seek(SeekFrom::Start(addr as u64))?;
+
+        for s in sample {
+            match s {
+                Sample::I16(i) => self.sink.write_i16::<LittleEndian>(*i)?,
+                Sample::I32(i) => self.sink.write_i32::<LittleEndian>(*i)?,
+                Sample::F32(f) => self.sink.write_f32::<LittleEndian>(*f)?,
+            }
+        }
+
+        Ok(())
+    }
+
     /// Writes a string in a field up to `max_len`
     ///
     /// The I2 format (as far as we understand) stores strings as utf8 bytes with 0 bytes for padding
@@ -177,7 +250,7 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::LDWriter;
+    use crate::{ChannelMetadata, Datatype, LDWriter};
     use std::io::Cursor;
     use std::iter;
 
@@ -203,5 +276,45 @@ mod tests {
 
         let bytes = cursor.into_inner();
         assert_eq!(bytes, [116, 101, 115, 116, 49, 50, 51, 52]);
+    }
+
+    #[test]
+    fn test_write_channel_metadata() {
+        let bytes: Vec<u8> = iter::repeat(0u8).take(124).collect();
+        let mut cursor = Cursor::new(bytes);
+        let mut writer = LDWriter::new(&mut cursor);
+
+        writer
+            .write_channel_metadata(&ChannelMetadata {
+                prev_addr: 0,
+                next_addr: 13508,
+                data_addr: 23056,
+                data_count: 908,
+                datatype: Datatype::I16,
+                sample_rate: 2,
+                shift: 0,
+                mul: 1,
+                scale: 1,
+                dec_places: 1,
+                name: "Air Temp Inlet".to_string(),
+                short_name: "Air Tem".to_string(),
+                unit: "C".to_string(),
+            })
+            .unwrap();
+
+        const EXPECTED: [u8; 124] = [
+            0x00, 0x00, 0x00, 0x00, 0xC4, 0x34, 0x00, 0x00, 0x10, 0x5A, 0x00, 0x00, 0x8C, 0x03,
+            0x00, 0x00, 0x04, 0x00, 0x03, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00,
+            0x01, 0x00, 0x01, 0x00, 0x41, 0x69, 0x72, 0x20, 0x54, 0x65, 0x6D, 0x70, 0x20, 0x49,
+            0x6E, 0x6C, 0x65, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41, 0x69, 0x72, 0x20, 0x54, 0x65,
+            0x6D, 0x00, 0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xC9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let bytes = cursor.into_inner();
+        assert_eq!(bytes, EXPECTED);
     }
 }
