@@ -2,6 +2,12 @@
 
 A MoTeC i2 file parser
 
+Try the included examples with:
+```
+cargo run --example read
+cargo run --example write
+```
+
 ## Features
 
 - [x] Parsing ld files
