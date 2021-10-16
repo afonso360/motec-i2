@@ -207,7 +207,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
     }
 
     /// Read the [ChannelMetadata] block at file offset `addr`
-    pub fn read_channel_metadata(&mut self, addr: u32) -> I2Result<ChannelMetadata> {
+    fn read_channel_metadata(&mut self, addr: u32) -> I2Result<ChannelMetadata> {
         self.source.seek(SeekFrom::Start(addr as u64))?;
 
         let prev_addr = self.source.read_u32::<LittleEndian>()?;
@@ -402,7 +402,7 @@ mod tests {
 
     macro_rules! assert_delta {
         ($x:expr, $y:expr, $d:expr) => {
-            if !($x - $y < $d || $y - $x < $d) {
+            if ($x - $y).abs() > $d {
                 panic!();
             }
         };
