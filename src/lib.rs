@@ -1,7 +1,10 @@
+mod error;
+mod full_header;
 mod reader;
 mod structs;
-mod error;
+mod writer;
 
-pub use structs::*;
-pub use reader::*;
 pub use error::*;
+pub use reader::*;
+pub use structs::*;
+pub use writer::*;

@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 use std::io;
+use std::str::Utf8Error;
 
 pub type I2Result<T> = Result<T, I2Error>;
 
@@ -11,6 +12,7 @@ pub enum I2Error {
     // Parsing Errors
     InvalidHeaderMarker { found: u32, expected: u32 },
     UnrecognizedDatatype { _type: u16, size: u16 },
+    NonUtf8String(Utf8Error),
 }
 
 impl fmt::Display for I2Error {
@@ -27,6 +29,7 @@ impl fmt::Display for I2Error {
                 "Unrecognized Datatype found (_type: {}, size: {})",
                 _type, size
             ),
+            I2Error::NonUtf8String(e) => write!(f, "Attempted to decode non utf8 string: {}", e),
         }
     }
 }
@@ -36,5 +39,11 @@ impl Error for I2Error {}
 impl From<io::Error> for I2Error {
     fn from(e: io::Error) -> Self {
         I2Error::IOError(e)
+    }
+}
+
+impl From<Utf8Error> for I2Error {
+    fn from(e: Utf8Error) -> Self {
+        I2Error::NonUtf8String(e)
     }
 }

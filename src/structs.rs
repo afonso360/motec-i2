@@ -1,12 +1,6 @@
 use crate::{I2Error, I2Result};
 
 #[derive(Debug, Clone, PartialEq, Hash)]
-pub enum ProLogging {
-    Enabled,
-    Disabled,
-}
-
-#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Header {
     pub(crate) channel_meta_ptr: u32,
     pub(crate) channel_data_ptr: u32,
@@ -28,9 +22,7 @@ pub struct Header {
     pub(crate) venue: String,
     pub(crate) session: String,
     pub(crate) short_comment: String,
-    pub(crate) event: String,
-    // pub(crate) session: String,
-    pub(crate) pro_logging: ProLogging,
+    pub(crate) pro_logging_bytes: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,4 +121,35 @@ pub struct ChannelMetadata {
     pub(crate) name: String,
     pub(crate) short_name: String,
     pub(crate) unit: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct Event {
+    /// Max 64 chars
+    pub(crate) name: String,
+    /// Max 64 chars
+    pub(crate) session: String,
+    /// Max 1024 chars
+    pub(crate) comment: String,
+
+    pub(crate) venue_addr: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct Venue {
+    /// Max 64 chars
+    pub(crate) name: String,
+
+    pub(crate) vehicle_addr: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct Vehicle {
+    /// Max 64 chars
+    pub(crate) id: String,
+    pub(crate) weight: u32,
+    /// Max 32 chars
+    pub(crate) _type: String,
+    /// Max 32 chars
+    pub(crate) comment: String,
 }

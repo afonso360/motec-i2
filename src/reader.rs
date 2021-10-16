@@ -1,9 +1,9 @@
-use crate::{ChannelMetadata, Datatype, Header, I2Error, I2Result, ProLogging, Sample};
+use crate::{ChannelMetadata, Datatype, Event, Header, I2Error, I2Result, Sample, Vehicle, Venue};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{Read, Seek, SeekFrom};
 use std::{io, iter};
 
-const LD_HEADER_MARKER: u32 = 64;
+pub(crate) const LD_HEADER_MARKER: u32 = 64;
 
 #[derive(Debug)]
 pub struct LDReader<'a, S: Read + Seek> {
@@ -38,30 +38,30 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
         let channel_data_ptr = self.source.read_u32::<LittleEndian>()?;
 
         let mut _unknown = self.read_bytes(20)?;
-        assert_eq!(_unknown, [0u8; 20]);
+        // assert_eq!(_unknown, [0u8; 20]);
 
+        // Sample1.ld has this at addr 0x6E2, that is probably the length of the header????
         let event_ptr = self.source.read_u32::<LittleEndian>()?;
 
         let mut _unknown = self.read_bytes(24)?;
-
         // Not 0 in 20160903-0051401.ld
         // assert_eq!(_unknown, [0u8; 24]);
 
         // TODO: These may not actually be const...
-        let unknown_const_1 = self.source.read_u16::<LittleEndian>()?;
-        assert_eq!(unknown_const_1, 0x0000);
-        let unknown_const_2 = self.source.read_u16::<LittleEndian>()?;
-        assert_eq!(unknown_const_2, 0x4240);
-        let unknown_const_3 = self.source.read_u16::<LittleEndian>()?;
-        assert_eq!(unknown_const_3, 0x000F);
+        let _unknown_const_1 = self.source.read_u16::<LittleEndian>()?;
+        // assert_eq!(_unknown_const_1, 0x0000);
+        let _unknown_const_2 = self.source.read_u16::<LittleEndian>()?;
+        // assert_eq!(_unknown_const_2, 0x4240);
+        let _unknown_const_3 = self.source.read_u16::<LittleEndian>()?;
+        // assert_eq!(_unknown_const_3, 0x000F);
 
         let device_serial = self.source.read_u32::<LittleEndian>()?;
         let device_type = self.read_string(8)?;
         let device_version = self.source.read_u16::<LittleEndian>()?;
 
         // TODO: This may not actually be const...
-        let unknown_const_4 = self.source.read_u16::<LittleEndian>()?;
-        assert_eq!(unknown_const_4, 0x0080);
+        let _unknown_const_4 = self.source.read_u16::<LittleEndian>()?;
+        // assert_eq!(_unknown_const_4, 0x0080);
 
         let num_channels = self.source.read_u32::<LittleEndian>()?;
         let _unknown = self.source.read_u32::<LittleEndian>()?;
@@ -71,29 +71,20 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
         let time_string = self.read_string(16)?;
         let _unknown = self.read_bytes(16)?;
 
-        let driver = self.read_string_space(64)?;
-        let vehicleid = self.read_string_space(64)?;
+        let driver = self.read_string(64)?;
+        let vehicleid = self.read_string(64)?;
         let _unknown = self.read_bytes(64)?;
-        let venue = self.read_string_space(64)?;
+        let venue = self.read_string(64)?;
         let _unknown = self.read_bytes(64)?;
 
         let _unknown = self.read_bytes(1024)?;
 
-        let pro_logging_magic_bytes = self.source.read_u32::<LittleEndian>()?;
-        // TODO: Check if this is how pro logging is enabled / disabled
-        let pro_logging = if pro_logging_magic_bytes != 0 {
-            ProLogging::Enabled
-        } else {
-            ProLogging::Disabled
-        };
+        let pro_logging_bytes = self.source.read_u32::<LittleEndian>()?;
 
         let _unknown = self.read_bytes(2)?;
         let session = self.read_string(64)?;
-        let short_comment = self.read_string_space(64)?;
+        let short_comment = self.read_string(64)?;
         let _unknown = self.read_bytes(126)?; // Probably long_comment? + some 2byte
-
-        let event = self.read_string(64)?;
-        let _session2 = self.read_string(64)?; // ??????
 
         //let long_comment = self.read_string(??);
 
@@ -104,6 +95,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
             device_serial,
             device_type,
             device_version,
+            pro_logging_bytes,
             num_channels,
             date_string,
             time_string,
@@ -112,11 +104,80 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
             venue,
             session,
             short_comment,
-            event,
-            pro_logging,
         };
         self.header = Some(header.clone());
         Ok(header)
+    }
+
+    pub fn read_event(&mut self) -> I2Result<Option<Event>> {
+        if self.header.is_none() {
+            self.read_header()?;
+        }
+
+        let event_ptr = self.header.as_ref().unwrap().event_ptr;
+        if event_ptr == 0 {
+            return Ok(None);
+        }
+
+        self.source.seek(SeekFrom::Start(event_ptr as u64))?;
+
+        let name = self.read_string(64)?;
+        let session = self.read_string(64)?;
+        let comment = self.read_string(1024)?;
+        let venue_addr = self.source.read_u16::<LittleEndian>()?;
+
+        Ok(Some(Event {
+            name,
+            session,
+            comment,
+            venue_addr,
+        }))
+    }
+
+    pub fn read_venue(&mut self) -> I2Result<Option<Venue>> {
+        Ok(match self.read_event()? {
+            Some(event) => {
+                if event.venue_addr == 0 {
+                    return Ok(None);
+                }
+
+                self.source.seek(SeekFrom::Start(event.venue_addr as u64))?;
+
+                let name = self.read_string(64)?;
+                let _unknown = self.read_bytes(1034)?;
+                let vehicle_addr = self.source.read_u16::<LittleEndian>()?;
+
+                Some(Venue { name, vehicle_addr })
+            }
+            None => None,
+        })
+    }
+
+    pub fn read_vehicle(&mut self) -> I2Result<Option<Vehicle>> {
+        Ok(match self.read_venue()? {
+            Some(venue) => {
+                if venue.vehicle_addr == 0 {
+                    return Ok(None);
+                }
+
+                self.source
+                    .seek(SeekFrom::Start(venue.vehicle_addr as u64))?;
+
+                let id = self.read_string(64)?;
+                let _unknown = self.read_bytes(128)?;
+                let weight = self.source.read_u32::<LittleEndian>()?;
+                let _type = self.read_string(32)?;
+                let comment = self.read_string(32)?;
+
+                Some(Vehicle {
+                    id,
+                    weight,
+                    _type,
+                    comment,
+                })
+            }
+            None => None,
+        })
     }
 
     /// Read the channel meta data blocks inside the ld file
@@ -127,7 +188,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
     /// Calls [LDReader::read_header] if it hasn't been called before
     pub fn read_channels(&mut self) -> I2Result<Vec<ChannelMetadata>> {
         if self.header.is_none() {
-            self.header = Some(self.read_header()?);
+            self.read_header()?;
         }
 
         let mut channels = vec![];
@@ -229,22 +290,18 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
     }
 
     /// Reads a string with a fixed size trimming null bytes
-    fn read_string(&mut self, size: usize) -> io::Result<String> {
+    fn read_string(&mut self, size: usize) -> I2Result<String> {
         let bytes = self.read_bytes(size)?;
-        let string = String::from_utf8(bytes).unwrap().replace('\0', ""); // TODO: this should be ?
-        Ok(string)
-    }
-
-    /// Reads a string with a fixed size trimming null bytes, and trailing space character
-    fn read_string_space(&mut self, size: usize) -> io::Result<String> {
-        Ok(self.read_string(size)?.trim_end_matches(' ').to_string())
+        let str_size = bytes.iter().position(|c| *c == b'\0').unwrap_or(size);
+        let str = ::std::str::from_utf8(&bytes[0..str_size])?;
+        Ok(str.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::reader::LDReader;
-    use crate::{ChannelMetadata, Datatype, Header, ProLogging, Sample};
+    use crate::{ChannelMetadata, Datatype, Event, Header, Sample, Vehicle, Venue};
     use std::fs;
     use std::io::Cursor;
 
@@ -254,8 +311,9 @@ mod tests {
         let mut cursor = Cursor::new(bytes);
         let mut reader = LDReader::new(&mut cursor);
 
+        let header = reader.read_header().unwrap();
         assert_eq!(
-            reader.read_header().unwrap(),
+            header,
             Header {
                 channel_meta_ptr: 0x3448,
                 channel_data_ptr: 0x5A10,
@@ -271,8 +329,7 @@ mod tests {
                 venue: "Calder".to_string(),
                 session: "2".to_string(),
                 short_comment: "second warmup".to_string(),
-                event: "i2 data day".to_string(),
-                pro_logging: ProLogging::Enabled, // 0xD20822,
+                pro_logging_bytes: 0xD20822,
             }
         );
     }
@@ -379,5 +436,60 @@ mod tests {
         assert_delta!(data[2].decode_f64(channel), 20.1, 0.000001);
         assert_delta!(data[3].decode_f64(channel), 19.9, 0.000001);
         assert_delta!(data[4].decode_f64(channel), 19.9, 0.000001);
+    }
+
+    #[test]
+    fn read_sample1_event() {
+        let bytes = fs::read("./samples/Sample1.ld").unwrap();
+        let mut cursor = Cursor::new(bytes);
+        let mut reader = LDReader::new(&mut cursor);
+
+        let event = reader.read_event().unwrap();
+
+        assert_eq!(
+            event,
+            Some(Event {
+                name: "i2 data day".to_string(),
+                session: "2".to_string(),
+                comment: "Calder Park, 23/11/05, fine sunny day".to_string(),
+                venue_addr: 0x1336,
+            })
+        );
+    }
+
+    #[test]
+    fn read_sample1_venue() {
+        let bytes = fs::read("./samples/Sample1.ld").unwrap();
+        let mut cursor = Cursor::new(bytes);
+        let mut reader = LDReader::new(&mut cursor);
+
+        let venue = reader.read_venue().unwrap();
+
+        assert_eq!(
+            venue,
+            Some(Venue {
+                name: "Calder".to_string(),
+                vehicle_addr: 0x1F54,
+            })
+        );
+    }
+
+    #[test]
+    fn read_sample1_vehicle() {
+        let bytes = fs::read("./samples/Sample1.ld").unwrap();
+        let mut cursor = Cursor::new(bytes);
+        let mut reader = LDReader::new(&mut cursor);
+
+        let vehicle = reader.read_vehicle().unwrap();
+
+        assert_eq!(
+            vehicle,
+            Some(Vehicle {
+                id: "11A".to_string(),
+                weight: 0,
+                _type: "Car".to_string(),
+                comment: "".to_string(),
+            })
+        );
     }
 }
