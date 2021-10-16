@@ -40,3 +40,15 @@ jobs:
         with:
           command: test
           args: --all
+
+      - name: Run read example
+        uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --example read
+
+      - name: Run write example
+        uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --example write
