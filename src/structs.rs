@@ -2,27 +2,27 @@ use crate::{I2Error, I2Result};
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Header {
-    pub(crate) channel_meta_ptr: u32,
-    pub(crate) channel_data_ptr: u32,
-    pub(crate) event_ptr: u32,
+    pub channel_meta_ptr: u32,
+    pub channel_data_ptr: u32,
+    pub event_ptr: u32,
 
-    pub(crate) device_serial: u32,
-    pub(crate) device_type: String,
-    pub(crate) device_version: u16,
+    pub device_serial: u32,
+    pub device_type: String,
+    pub device_version: u16,
 
-    pub(crate) num_channels: u32,
+    pub num_channels: u32,
 
     // TODO: Replace with timestamp
-    pub(crate) date_string: String,
-    pub(crate) time_string: String,
+    pub date_string: String,
+    pub time_string: String,
 
     // TODO: Probably should be Option<String>?
-    pub(crate) driver: String,
-    pub(crate) vehicleid: String,
-    pub(crate) venue: String,
-    pub(crate) session: String,
-    pub(crate) short_comment: String,
-    pub(crate) pro_logging_bytes: u32,
+    pub driver: String,
+    pub vehicleid: String,
+    pub venue: String,
+    pub session: String,
+    pub short_comment: String,
+    pub pro_logging_bytes: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,8 +41,11 @@ impl Sample {
             Sample::F32(v) => *v as f64,
         };
 
+        // TODO: channel.shift figures into this somewhere... but we don't know what to do with it
+        // Is it a binary shift? or a decimal shift? I'm leaning towards decimal shift, but not sure
+        assert_eq!(channel.shift, 0);
         let value = value / channel.scale as f64;
-        let value = value * (10.0f64.powi(-channel.dec_places as i32) * (channel.shift as f64));
+        let value = value * (10.0f64.powi(-channel.dec_places as i32));
         let value = value * channel.mul as f64;
         value
     }
@@ -103,53 +106,53 @@ impl Datatype {
 /// This only contains info about a channel, actual data is stored somewhere else on the file.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct ChannelMetadata {
-    pub(crate) prev_addr: u32,
-    pub(crate) next_addr: u32,
+    pub prev_addr: u32,
+    pub next_addr: u32,
 
-    pub(crate) data_addr: u32,
-    pub(crate) data_count: u32,
+    pub data_addr: u32,
+    pub data_count: u32,
 
-    pub(crate) datatype: Datatype,
+    pub datatype: Datatype,
     /// Sample Rate in Hz
-    pub(crate) sample_rate: u16,
+    pub sample_rate: u16,
 
-    pub(crate) shift: u16,
-    pub(crate) mul: u16,
-    pub(crate) scale: u16,
-    pub(crate) dec_places: i16,
+    pub shift: u16,
+    pub mul: u16,
+    pub scale: u16,
+    pub dec_places: i16,
 
-    pub(crate) name: String,
-    pub(crate) short_name: String,
-    pub(crate) unit: String,
+    pub name: String,
+    pub short_name: String,
+    pub unit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Event {
     /// Max 64 chars
-    pub(crate) name: String,
+    pub name: String,
     /// Max 64 chars
-    pub(crate) session: String,
+    pub session: String,
     /// Max 1024 chars
-    pub(crate) comment: String,
+    pub comment: String,
 
-    pub(crate) venue_addr: u16,
+    pub venue_addr: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Venue {
     /// Max 64 chars
-    pub(crate) name: String,
+    pub name: String,
 
-    pub(crate) vehicle_addr: u16,
+    pub vehicle_addr: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Vehicle {
     /// Max 64 chars
-    pub(crate) id: String,
-    pub(crate) weight: u32,
+    pub id: String,
+    pub weight: u32,
     /// Max 32 chars
-    pub(crate) _type: String,
+    pub _type: String,
     /// Max 32 chars
-    pub(crate) comment: String,
+    pub comment: String,
 }
