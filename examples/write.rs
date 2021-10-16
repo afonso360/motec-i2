@@ -1,5 +1,4 @@
-use motec_i2::{ChannelMetadata, Datatype, Header, I2Result, LDReader, LDWriter, Sample};
-use std::env;
+use motec_i2::{ChannelMetadata, Datatype, Header, I2Result, LDWriter, Sample};
 use std::fs::File;
 
 fn main() -> I2Result<()> {
@@ -25,30 +24,7 @@ fn main() -> I2Result<()> {
         session: "2".to_string(),
         short_comment: "second warmup".to_string(),
         pro_logging_bytes: 13764642,
-    });
-
-    // Event: Some(
-    //     Event {
-    //     name: "i2 data day",
-    //     session: "2",
-    //     comment: "Calder Park, 23/11/05, fine sunny day",
-    //     venue_addr: 4918,
-    // },
-    // )
-    // Venue: Some(
-    //     Venue {
-    //     name: "Calder",
-    //     vehicle_addr: 8020,
-    // },
-    // )
-    // Vehicle: Some(
-    //     Vehicle {
-    //     id: "11A",
-    //     weight: 0,
-    //     _type: "Car",
-    //     comment: "",
-    // },
-    // )
+    })?;
 
     let channel0_meta = ChannelMetadata {
         prev_addr: 0,
