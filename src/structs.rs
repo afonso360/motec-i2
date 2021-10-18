@@ -1,11 +1,49 @@
 use crate::{I2Error, I2Result};
+use std::io::SeekFrom;
+use std::ops::Add;
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
+pub struct FileAddr(u32);
+
+impl FileAddr {
+    pub(crate) fn seek(self) -> SeekFrom {
+        SeekFrom::Start(self.0 as u64)
+    }
+
+    /// Is this a zero addr
+    pub(crate) fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl Add<u64> for FileAddr {
+    type Output = FileAddr;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        FileAddr(self.0 + rhs as u32)
+    }
+}
+
+impl From<FileAddr> for u32 {
+    fn from(addr: FileAddr) -> Self {
+        addr.0
+    }
+}
+
+impl From<u32> for FileAddr {
+    fn from(addr: u32) -> Self {
+        FileAddr(addr)
+    }
+}
+
+impl From<u16> for FileAddr {
+    fn from(addr: u16) -> Self {
+        FileAddr(addr as u32)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Header {
-    pub channel_meta_ptr: u32,
-    pub channel_data_ptr: u32,
-    pub event_ptr: u32,
-
     pub device_serial: u32,
     pub device_type: String,
     pub device_version: u16,
@@ -25,6 +63,15 @@ pub struct Header {
     pub pro_logging_bytes: u32,
 }
 
+impl Header {
+    /// Offset from the start of this structure where channel metadata address exists
+    pub(crate) const CHANNEL_META_OFFSET: u64 = 8;
+    /// Offset from the start of this structure where channel data address exists
+    pub(crate) const CHANNEL_DATA_OFFSET: u64 = 12;
+    /// Offset from the start of this structure where event address exists
+    pub(crate) const EVENT_OFFSET: u64 = 36;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sample {
     I16(i16),
@@ -41,12 +88,11 @@ impl Sample {
             Sample::F32(v) => *v as f64,
         };
 
-        // TODO: channel.shift figures into this somewhere... but we don't know what to do with it
-        // Is it a binary shift? or a decimal shift? I'm leaning towards decimal shift, but not sure
-        assert_eq!(channel.shift, 0);
+        // TODO: Test channel.offset with values of mul != 1
         let value = value / channel.scale as f64;
         let value = value * (10.0f64.powi(-channel.dec_places as i32));
         let value = value * channel.mul as f64;
+        let value = value + channel.offset as f64;
         value
     }
 }
@@ -115,17 +161,18 @@ impl Datatype {
 /// This only contains info about a channel, actual data is stored somewhere else on the file.
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct ChannelMetadata {
-    pub prev_addr: u32,
-    pub next_addr: u32,
+    pub prev_addr: FileAddr,
+    pub next_addr: FileAddr,
 
-    pub data_addr: u32,
+    pub data_addr: FileAddr,
     pub data_count: u32,
 
     pub datatype: Datatype,
     /// Sample Rate in Hz
     pub sample_rate: u16,
 
-    pub shift: u16,
+    /// This number is added after the rest of the transformations have been applied
+    pub offset: u16,
     pub mul: u16,
     pub scale: u16,
     pub dec_places: i16,
@@ -153,16 +200,22 @@ pub struct Event {
     pub session: String,
     /// Max 1024 chars
     pub comment: String,
+}
 
-    pub venue_addr: u16,
+impl Event {
+    /// Offset from the start of this structure where venue address exists
+    pub(crate) const VENUE_ADDR_OFFSET: u64 = 1152;
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Venue {
     /// Max 64 chars
     pub name: String,
+}
 
-    pub vehicle_addr: u16,
+impl Venue {
+    /// Offset from the start of this structure where vehicle address exists
+    pub(crate) const VEHICLE_ADDR_OFFSET: u64 = 1098;
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]

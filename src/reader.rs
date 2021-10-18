@@ -1,25 +1,91 @@
-use crate::{ChannelMetadata, Datatype, Event, Header, I2Error, I2Result, Sample, Vehicle, Venue};
+use crate::{
+    ChannelMetadata, Datatype, Event, FileAddr, Header, I2Error, I2Result, Sample, Vehicle, Venue,
+};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{Read, Seek, SeekFrom};
 use std::{io, iter};
 
 pub(crate) const LD_HEADER_MARKER: u32 = 64;
 
+/// Holds all the addresses of important structures in the file
+#[derive(Debug, Clone, PartialEq)]
+struct AddressTable {
+    channel_meta: FileAddr,
+    channel_data: FileAddr,
+    event: Option<FileAddr>,
+    venue: Option<FileAddr>,
+    vehicle: Option<FileAddr>,
+}
+
 #[derive(Debug)]
 pub struct LDReader<'a, S: Read + Seek> {
     source: &'a mut S,
-    header: Option<Header>,
+    address_table: Option<AddressTable>,
 }
 
 impl<'a, S: Read + Seek> LDReader<'a, S> {
     pub fn new(source: &'a mut S) -> Self {
         Self {
             source,
-            header: None,
+            address_table: None,
         }
     }
 
-    // TODO: Remove asserts and change into a proper error type
+    /// Retrieves a copy of the address table if it exists, otherwise finds all the addresses.
+    fn address_table(&mut self) -> I2Result<AddressTable> {
+        if let Some(addr_tbl) = &self.address_table {
+            return Ok(addr_tbl.clone());
+        }
+
+        self.source
+            .seek(SeekFrom::Start(Header::CHANNEL_META_OFFSET))?;
+        let channel_meta = self.source.read_u32::<LittleEndian>()?.into();
+
+        self.source
+            .seek(SeekFrom::Start(Header::CHANNEL_DATA_OFFSET))?;
+        let channel_data = self.source.read_u32::<LittleEndian>()?.into();
+
+        self.source.seek(SeekFrom::Start(Header::EVENT_OFFSET))?;
+        let event = match self.source.read_u32::<LittleEndian>()? {
+            0 => None,
+            addr => Some(addr.into()),
+        };
+
+        let venue = match event {
+            Some(event_addr) => {
+                let venue_addr: FileAddr = event_addr + Event::VENUE_ADDR_OFFSET;
+                self.source.seek(venue_addr.seek())?;
+                match self.source.read_u16::<LittleEndian>()? {
+                    0 => None,
+                    addr => Some(addr.into()),
+                }
+            }
+            None => None,
+        };
+
+        let vehicle = match venue {
+            Some(venue_addr) => {
+                let vehicle_addr: FileAddr = venue_addr + Venue::VEHICLE_ADDR_OFFSET;
+                self.source.seek(vehicle_addr.seek())?;
+                match self.source.read_u16::<LittleEndian>()? {
+                    0 => None,
+                    addr => Some(addr.into()),
+                }
+            }
+            None => None,
+        };
+
+        let addr_tbl = AddressTable {
+            channel_meta,
+            channel_data,
+            event,
+            venue,
+            vehicle,
+        };
+        self.address_table = Some(addr_tbl.clone());
+        Ok(addr_tbl)
+    }
+
     pub fn read_header(&mut self) -> I2Result<Header> {
         // Header is always at start
         self.source.seek(SeekFrom::Start(0))?;
@@ -34,14 +100,16 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 
         let _unknown = self.source.read_u32::<LittleEndian>()?;
 
-        let channel_meta_ptr = self.source.read_u32::<LittleEndian>()?;
-        let channel_data_ptr = self.source.read_u32::<LittleEndian>()?;
+        // TODO: We can probably skip reading these bytes
+        let _channel_meta_ptr = self.source.read_u32::<LittleEndian>()?;
+        let _channel_data_ptr = self.source.read_u32::<LittleEndian>()?;
 
         let mut _unknown = self.read_bytes(20)?;
         // assert_eq!(_unknown, [0u8; 20]);
 
         // Sample1.ld has this at addr 0x6E2, that is probably the length of the header????
-        let event_ptr = self.source.read_u32::<LittleEndian>()?;
+        // TODO: We can probably skip reading these bytes
+        let _event_ptr = self.source.read_u32::<LittleEndian>()?;
 
         let mut _unknown = self.read_bytes(24)?;
         // Not 0 in 20160903-0051401.ld
@@ -84,14 +152,9 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
         let _unknown = self.read_bytes(2)?;
         let session = self.read_string(64)?;
         let short_comment = self.read_string(64)?;
-        let _unknown = self.read_bytes(126)?; // Probably long_comment? + some 2byte
+        let _unknown = self.read_bytes(126)?;
 
-        //let long_comment = self.read_string(??);
-
-        let header = Header {
-            channel_meta_ptr,
-            channel_data_ptr,
-            event_ptr,
+        Ok(Header {
             device_serial,
             device_type,
             device_version,
@@ -104,64 +167,48 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
             venue,
             session,
             short_comment,
-        };
-        self.header = Some(header.clone());
-        Ok(header)
+        })
     }
 
     pub fn read_event(&mut self) -> I2Result<Option<Event>> {
-        if self.header.is_none() {
-            self.read_header()?;
-        }
+        Ok(match self.address_table()?.event {
+            Some(addr) => {
+                self.source.seek(addr.seek())?;
 
-        let event_ptr = self.header.as_ref().unwrap().event_ptr;
-        if event_ptr == 0 {
-            return Ok(None);
-        }
+                let name = self.read_string(64)?;
+                let session = self.read_string(64)?;
+                let comment = self.read_string(1024)?;
+                // let venue_addr = self.source.read_u16::<LittleEndian>()?;
 
-        self.source.seek(SeekFrom::Start(event_ptr as u64))?;
-
-        let name = self.read_string(64)?;
-        let session = self.read_string(64)?;
-        let comment = self.read_string(1024)?;
-        let venue_addr = self.source.read_u16::<LittleEndian>()?;
-
-        Ok(Some(Event {
-            name,
-            session,
-            comment,
-            venue_addr,
-        }))
+                Some(Event {
+                    name,
+                    session,
+                    comment,
+                })
+            }
+            None => None,
+        })
     }
 
     pub fn read_venue(&mut self) -> I2Result<Option<Venue>> {
-        Ok(match self.read_event()? {
-            Some(event) => {
-                if event.venue_addr == 0 {
-                    return Ok(None);
-                }
-
-                self.source.seek(SeekFrom::Start(event.venue_addr as u64))?;
+        Ok(match self.address_table()?.venue {
+            Some(addr) => {
+                self.source.seek(addr.seek())?;
 
                 let name = self.read_string(64)?;
                 let _unknown = self.read_bytes(1034)?;
-                let vehicle_addr = self.source.read_u16::<LittleEndian>()?;
+                // let vehicle_addr = self.source.read_u16::<LittleEndian>()?;
 
-                Some(Venue { name, vehicle_addr })
+                Some(Venue { name })
             }
             None => None,
         })
     }
 
     pub fn read_vehicle(&mut self) -> I2Result<Option<Vehicle>> {
-        Ok(match self.read_venue()? {
-            Some(venue) => {
-                if venue.vehicle_addr == 0 {
-                    return Ok(None);
-                }
-
-                self.source
-                    .seek(SeekFrom::Start(venue.vehicle_addr as u64))?;
+        Ok(match self.address_table()?.vehicle {
+            Some(addr) => {
+                self.source.seek(addr.seek())?;
 
                 let id = self.read_string(64)?;
                 let _unknown = self.read_bytes(128)?;
@@ -187,16 +234,14 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
     ///
     /// Calls [LDReader::read_header] if it hasn't been called before
     pub fn read_channels(&mut self) -> I2Result<Vec<ChannelMetadata>> {
-        if self.header.is_none() {
-            self.read_header()?;
-        }
+        let channel_meta = self.address_table()?.channel_meta;
 
         let mut channels = vec![];
 
-        let mut next_ptr = self.header.as_ref().unwrap().channel_meta_ptr;
+        let mut next_ptr = channel_meta;
         loop {
             // A 0 addr means we are done searching this list
-            if next_ptr == 0 {
+            if next_ptr.is_zero() {
                 return Ok(channels);
             }
 
@@ -207,12 +252,12 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
     }
 
     /// Read the [ChannelMetadata] block at file offset `addr`
-    fn read_channel_metadata(&mut self, addr: u32) -> I2Result<ChannelMetadata> {
-        self.source.seek(SeekFrom::Start(addr as u64))?;
+    fn read_channel_metadata(&mut self, addr: FileAddr) -> I2Result<ChannelMetadata> {
+        self.source.seek(addr.seek())?;
 
-        let prev_addr = self.source.read_u32::<LittleEndian>()?;
-        let next_addr = self.source.read_u32::<LittleEndian>()?;
-        let data_addr = self.source.read_u32::<LittleEndian>()?;
+        let prev_addr = FileAddr::from(self.source.read_u32::<LittleEndian>()?);
+        let next_addr = FileAddr::from(self.source.read_u32::<LittleEndian>()?);
+        let data_addr = FileAddr::from(self.source.read_u32::<LittleEndian>()?);
         let data_count = self.source.read_u32::<LittleEndian>()?;
 
         let _unknown = self.source.read_u16::<LittleEndian>()?;
@@ -223,7 +268,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 
         let sample_rate = self.source.read_u16::<LittleEndian>()?;
 
-        let shift = self.source.read_u16::<LittleEndian>()?;
+        let offset = self.source.read_u16::<LittleEndian>()?;
         let mul = self.source.read_u16::<LittleEndian>()?;
         let scale = self.source.read_u16::<LittleEndian>()?;
         let dec_places = self.source.read_i16::<LittleEndian>()?;
@@ -240,7 +285,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
             data_count,
             datatype,
             sample_rate,
-            shift,
+            offset,
             mul,
             scale,
             dec_places,
@@ -254,8 +299,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 
     /// Returns a iterator over the channel data
     pub fn channel_data(&mut self, channel: &ChannelMetadata) -> I2Result<Vec<Sample>> {
-        self.source
-            .seek(SeekFrom::Start(channel.data_addr as u64))?;
+        self.source.seek(channel.data_addr.seek())?;
 
         // Data for a channel is stored in a contiguous manner at the addr ptr
         let data = (0..channel.data_count)
@@ -300,10 +344,29 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::reader::LDReader;
+    use crate::reader::{AddressTable, FileAddr, LDReader};
     use crate::{ChannelMetadata, Datatype, Event, Header, Sample, Vehicle, Venue};
     use std::fs;
     use std::io::Cursor;
+
+    #[test]
+    fn read_sample1_address_table() {
+        let bytes = fs::read("./samples/Sample1.ld").unwrap();
+        let mut cursor = Cursor::new(bytes);
+        let mut reader = LDReader::new(&mut cursor);
+
+        let addr_tbl = reader.address_table().unwrap();
+        assert_eq!(
+            addr_tbl,
+            AddressTable {
+                channel_meta: FileAddr::from(0x3448u32),
+                channel_data: FileAddr::from(0x5A10u32),
+                event: Some(FileAddr::from(0x06E2u32)),
+                venue: Some(FileAddr::from(0x1336u32)),
+                vehicle: Some(FileAddr::from(0x1F54u32)),
+            }
+        );
+    }
 
     #[test]
     fn read_sample1_header() {
@@ -315,9 +378,6 @@ mod tests {
         assert_eq!(
             header,
             Header {
-                channel_meta_ptr: 0x3448,
-                channel_data_ptr: 0x5A10,
-                event_ptr: 0x06E2,
                 device_serial: 0x2EE7,
                 device_type: "ADL".to_string(),
                 device_version: 0x01A4,
@@ -345,13 +405,13 @@ mod tests {
         assert_eq!(
             channels[0],
             ChannelMetadata {
-                prev_addr: 0,
-                next_addr: 13508,
-                data_addr: 23056,
+                prev_addr: FileAddr::from(0u32),
+                next_addr: FileAddr::from(13508u32),
+                data_addr: FileAddr::from(23056u32),
                 data_count: 908,
                 datatype: Datatype::I16,
                 sample_rate: 2,
-                shift: 0,
+                offset: 0,
                 mul: 1,
                 scale: 1,
                 dec_places: 1,
@@ -364,13 +424,13 @@ mod tests {
         assert_eq!(
             channels[1],
             ChannelMetadata {
-                prev_addr: 13384,
-                next_addr: 13632,
-                data_addr: 24872,
+                prev_addr: FileAddr::from(13384u32),
+                next_addr: FileAddr::from(13632u32),
+                data_addr: FileAddr::from(24872u32),
                 data_count: 4540,
                 datatype: Datatype::I16,
                 sample_rate: 10,
-                shift: 0,
+                offset: 0,
                 mul: 1,
                 scale: 1,
                 dec_places: 0,
@@ -383,13 +443,13 @@ mod tests {
         assert_eq!(
             channels[77],
             ChannelMetadata {
-                prev_addr: 22808,
-                next_addr: 0,
-                data_addr: 1189836,
+                prev_addr: FileAddr::from(22808u32),
+                next_addr: FileAddr::from(0u32),
+                data_addr: FileAddr::from(1189836u32),
                 data_count: 9080,
                 datatype: Datatype::I16,
                 sample_rate: 20,
-                shift: 0,
+                offset: 0,
                 mul: 1,
                 scale: 1,
                 dec_places: 1,
@@ -452,7 +512,6 @@ mod tests {
                 name: "i2 data day".to_string(),
                 session: "2".to_string(),
                 comment: "Calder Park, 23/11/05, fine sunny day".to_string(),
-                venue_addr: 0x1336,
             })
         );
     }
@@ -469,7 +528,6 @@ mod tests {
             venue,
             Some(Venue {
                 name: "Calder".to_string(),
-                vehicle_addr: 0x1F54,
             })
         );
     }

@@ -1,83 +1,8 @@
 use crate::full_header::FULL_HEADER;
-use crate::{ChannelMetadata, Header, I2Result, Sample, LD_HEADER_MARKER};
+use crate::{ChannelMetadata, FileAddr, Header, I2Result, Sample, LD_HEADER_MARKER};
 use byteorder::{LittleEndian, WriteBytesExt};
 use core::iter;
 use std::io::{Seek, SeekFrom, Write};
-
-//C:/Users/Afonso/.cargo/bin/cargo.exe test --color=always --package motec-i2 --lib reader::tests::read_sample1_channel_data --no-fail-fast -- --format=json --exact -Z unstable-options --show-output
-// Testing started at 16:39 ...
-// warning: unused import: `crate::reader::LDReader`
-//    --> src\writer.rs:102:9
-//     |
-// 102 |     use crate::reader::LDReader;
-//     |         ^^^^^^^^^^^^^^^^^^^^^^^
-//     |
-//     = note: `#[warn(unused_imports)]` on by default
-//
-// warning: unused imports: `ChannelMetadata`, `Datatype`, `Header`, `Sample`
-//    --> src\writer.rs:103:17
-//     |
-// 103 |     use crate::{ChannelMetadata, Datatype, Header, LDWriter, Sample};
-//     |                 ^^^^^^^^^^^^^^^  ^^^^^^^^  ^^^^^^            ^^^^^^
-//
-// warning: unused import: `fs`
-//    --> src\writer.rs:105:15
-//     |
-// 105 |     use std::{fs, iter};
-//     |               ^^
-//
-// warning: variable does not need to be mutable
-//    --> src\writer.rs:109:13
-//     |
-// 109 |         let mut bytes: Vec<u8> = iter::repeat(1u8).take(8).collect();
-//     |             ----^^^^^
-//     |             |
-//     |             help: remove this `mut`
-//     |
-//     = note: `#[warn(unused_mut)]` on by default
-//
-// warning: variable does not need to be mutable
-//    --> src\writer.rs:121:13
-//     |
-// 121 |         let mut bytes: Vec<u8> = iter::repeat(1u8).take(8).collect();
-//     |             ----^^^^^
-//     |             |
-//     |             help: remove this `mut`
-//
-// warning: unused `Result` that must be used
-//   --> src\writer.rs:72:9
-//    |
-// 72 |         self.sink.write_u16::<LittleEndian>(0u16);
-//    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-//    |
-//    = note: `#[warn(unused_must_use)]` on by default
-//    = note: this `Result` may be an `Err` variant, which should be handled
-//
-// warning: `motec-i2` (lib test) generated 6 warnings
-//     Finished test [unoptimized + debuginfo] target(s) in 0.02s
-//      Running unittests (target\debug\deps\motec_i2-b754b7a30fad338a.exe)
-// Rip: Ok(
-//     Header {
-//         channel_meta_ptr: 13384,
-//         channel_data_ptr: 23056,
-//         event_ptr: 1762,
-//         device_serial: 12007,
-//         device_type: "ADL",
-//         device_version: 420,
-//         num_channels: 78,
-//         date_string: "23/11/2005",
-//         time_string: "09:53:00",
-//         driver: "",
-//         vehicleid: "11A",
-//         venue: "Calder",
-//         session: "2",
-//         short_comment: "second warmup",
-//         event: "i2 data day",
-//         pro_logging_bytes: 13764642,
-//     },
-// )
-//
-// Process finished with exit code 0
 
 #[derive(Debug)]
 pub struct LDWriter<'a, S: Write + Seek> {
@@ -106,13 +31,15 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
         // TODO: We don't know what this is, but Sample1.ld has it as 0
         self.sink.write_u32::<LittleEndian>(0x00000000)?;
 
-        self.sink.write_u32::<LittleEndian>(hdr.channel_meta_ptr)?;
-        self.sink.write_u32::<LittleEndian>(hdr.channel_data_ptr)?;
+        // TODO: Write this
+        // self.sink.write_u32::<LittleEndian>(hdr.channel_meta_ptr)?;
+        // self.sink.write_u32::<LittleEndian>(hdr.channel_data_ptr)?;
 
         // TODO: We don't know what this is, but Sample1.ld has it as 0
         self.sink.write(&[0u8; 20][..])?;
 
-        self.sink.write_u32::<LittleEndian>(hdr.event_ptr)?;
+        // TODO: Write this out
+        // self.sink.write_u32::<LittleEndian>(hdr.event_ptr)?;
 
         // TODO: We don't know what this is, but Sample1.ld has it as 0
         // 20160903-0051401.ld has this as a different value
@@ -141,10 +68,11 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
 
         self.write_string(64, &hdr.driver)?;
         self.write_string(64, &hdr.vehicleid)?;
-        self.write_string(64, "")?;
+        self.write_string(64, "")?; // These strings don't seem to show up in i2
         self.write_string(64, &hdr.venue)?;
-        self.write_string(64, "")?;
+        self.write_string(64, "")?; // These strings don't seem to show up in i2
 
+        // Not a string, i2 fails to read data if this is a string
         self.sink.write(&[0u8; 1024])?;
 
         // 0xD20822 for Sample1.ld
@@ -175,14 +103,15 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
             let mut meta = meta.clone();
             let i = i as u32;
 
-            meta.prev_addr = i * ChannelMetadata::ENTRY_SIZE;
-            meta.next_addr = ((i + 1) % (channels.len() as u32)) * ChannelMetadata::ENTRY_SIZE;
+            meta.prev_addr = FileAddr::from(i * ChannelMetadata::ENTRY_SIZE);
+            meta.next_addr =
+                FileAddr::from(((i + 1) % (channels.len() as u32)) * ChannelMetadata::ENTRY_SIZE);
             meta.data_count = samples.len() as u32;
 
             let header_offset = 0x3448;
             let meta_offset = channels.len() as u32 * ChannelMetadata::ENTRY_SIZE;
             let data_offset: u32 = channels.iter().map(|(c, _)| c.data_size()).sum();
-            meta.data_addr = header_offset + meta_offset + data_offset;
+            meta.data_addr = FileAddr::from(header_offset + meta_offset + data_offset);
 
             self.write_channel_metadata(&meta)?;
             self.write_samples(meta.data_addr, samples)?;
@@ -192,9 +121,12 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
     }
 
     fn write_channel_metadata(&mut self, channel: &ChannelMetadata) -> I2Result<()> {
-        self.sink.write_u32::<LittleEndian>(channel.prev_addr)?;
-        self.sink.write_u32::<LittleEndian>(channel.next_addr)?;
-        self.sink.write_u32::<LittleEndian>(channel.data_addr)?;
+        self.sink
+            .write_u32::<LittleEndian>(channel.prev_addr.into())?;
+        self.sink
+            .write_u32::<LittleEndian>(channel.next_addr.into())?;
+        self.sink
+            .write_u32::<LittleEndian>(channel.data_addr.into())?;
         self.sink.write_u32::<LittleEndian>(channel.data_count)?;
 
         // TODO: Not sure what this is...
@@ -207,7 +139,7 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
 
         self.sink.write_u16::<LittleEndian>(channel.sample_rate)?;
 
-        self.sink.write_u16::<LittleEndian>(channel.shift)?;
+        self.sink.write_u16::<LittleEndian>(channel.offset)?;
         self.sink.write_u16::<LittleEndian>(channel.mul)?;
         self.sink.write_u16::<LittleEndian>(channel.scale)?;
         self.sink.write_i16::<LittleEndian>(channel.dec_places)?;
@@ -222,8 +154,8 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
         Ok(())
     }
 
-    fn write_samples(&mut self, addr: u32, sample: &Vec<Sample>) -> I2Result<()> {
-        self.sink.seek(SeekFrom::Start(addr as u64))?;
+    fn write_samples(&mut self, addr: FileAddr, sample: &Vec<Sample>) -> I2Result<()> {
+        self.sink.seek(addr.seek())?;
 
         for s in sample {
             match s {
@@ -250,7 +182,7 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ChannelMetadata, Datatype, LDWriter};
+    use crate::{ChannelMetadata, Datatype, FileAddr, LDWriter};
     use std::io::Cursor;
     use std::iter;
 
@@ -286,13 +218,13 @@ mod tests {
 
         writer
             .write_channel_metadata(&ChannelMetadata {
-                prev_addr: 0,
-                next_addr: 13508,
-                data_addr: 23056,
+                prev_addr: FileAddr::from(0u32),
+                next_addr: FileAddr::from(13508u32),
+                data_addr: FileAddr::from(23056u32),
                 data_count: 908,
                 datatype: Datatype::I16,
                 sample_rate: 2,
-                shift: 0,
+                offset: 0,
                 mul: 1,
                 scale: 1,
                 dec_places: 1,

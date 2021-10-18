@@ -1,4 +1,4 @@
-use motec_i2::{ChannelMetadata, Datatype, Header, I2Result, LDWriter, Sample};
+use motec_i2::{ChannelMetadata, Datatype, FileAddr, Header, I2Result, LDWriter, Sample};
 use std::fs::File;
 
 fn main() -> I2Result<()> {
@@ -9,9 +9,6 @@ fn main() -> I2Result<()> {
     let mut writer = LDWriter::new(&mut file);
 
     writer.write_header(&Header {
-        channel_meta_ptr: 13384,
-        channel_data_ptr: 23056,
-        event_ptr: 1762,
         device_serial: 12007,
         device_type: "ADL".to_string(),
         device_version: 420,
@@ -27,13 +24,13 @@ fn main() -> I2Result<()> {
     })?;
 
     let channel0_meta = ChannelMetadata {
-        prev_addr: 0,
-        next_addr: 0,
-        data_addr: 0,
+        prev_addr: FileAddr::from(0u32),
+        next_addr: FileAddr::from(0u32),
+        data_addr: FileAddr::from(0u32),
         data_count: 0,
         datatype: Datatype::I16,
         sample_rate: 2,
-        shift: 0,
+        offset: 2,
         mul: 1,
         scale: 1,
         dec_places: 1,
