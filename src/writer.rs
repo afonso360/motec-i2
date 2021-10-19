@@ -76,7 +76,8 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
         self.sink.write(&[0u8; 1024])?;
 
         // 0xD20822 for Sample1.ld
-        self.sink.write_u32::<LittleEndian>(hdr.pro_logging_bytes)?;
+        // ProLogging related
+        self.sink.write_u32::<LittleEndian>(0xD20822)?;
         self.sink.write_u16::<LittleEndian>(0u16)?;
 
         self.write_string(64, &hdr.session)?;

@@ -20,7 +20,6 @@ fn main() -> I2Result<()> {
         venue: "Calder".to_string(),
         session: "2".to_string(),
         short_comment: "second warmup".to_string(),
-        pro_logging_bytes: 13764642,
     })?;
 
     let channel0_meta = ChannelMetadata {

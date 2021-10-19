@@ -60,7 +60,6 @@ pub struct Header {
     pub venue: String,
     pub session: String,
     pub short_comment: String,
-    pub pro_logging_bytes: u32,
 }
 
 impl Header {
