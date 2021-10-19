@@ -79,7 +79,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 
         let _unknown = self.read_bytes(1024)?;
 
-        let pro_logging_bytes = self.source.read_u32::<LittleEndian>()?;
+        let _pro_logging_bytes = self.source.read_u32::<LittleEndian>()?;
 
         let _unknown = self.read_bytes(2)?;
         let session = self.read_string(64)?;
@@ -95,7 +95,6 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
             device_serial,
             device_type,
             device_version,
-            pro_logging_bytes,
             num_channels,
             date_string,
             time_string,
@@ -329,7 +328,6 @@ mod tests {
                 venue: "Calder".to_string(),
                 session: "2".to_string(),
                 short_comment: "second warmup".to_string(),
-                pro_logging_bytes: 0xD20822,
             }
         );
     }
