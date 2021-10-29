@@ -6,6 +6,10 @@ use std::ops::Add;
 pub struct FileAddr(u32);
 
 impl FileAddr {
+    pub(crate) fn zero() -> Self {
+        FileAddr(0)
+    }
+
     pub(crate) fn seek(self) -> SeekFrom {
         SeekFrom::Start(self.0 as u64)
     }
@@ -14,6 +18,11 @@ impl FileAddr {
     pub(crate) fn is_zero(&self) -> bool {
         self.0 == 0
     }
+
+    /// Is this a zero addr
+    pub(crate) fn as_u32(&self) -> u32 {
+        self.0
+    }
 }
 
 impl Add<u64> for FileAddr {
@@ -21,6 +30,14 @@ impl Add<u64> for FileAddr {
 
     fn add(self, rhs: u64) -> Self::Output {
         FileAddr(self.0 + rhs as u32)
+    }
+}
+
+impl Add<u32> for FileAddr {
+    type Output = FileAddr;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        FileAddr(self.0 + rhs)
     }
 }
 
@@ -80,7 +97,7 @@ pub enum Sample {
 
 impl Sample {
     /// Calculates the final value of this sample as a f64
-    pub fn decode_f64(&self, channel: &ChannelMetadata) -> f64 {
+    pub fn decode_f64(&self, channel: &Channel) -> f64 {
         let value = match self {
             Sample::I16(v) => *v as f64,
             Sample::I32(v) => *v as f64,
@@ -156,16 +173,36 @@ impl Datatype {
     }
 }
 
-/// ChannelMetadata is a doubly linked list of blocks in the file
-/// This only contains info about a channel, actual data is stored somewhere else on the file.
+/// Represents the metadata about a channel that is written on a file. This includes
+/// the location in the file of the channel, as well as metadata present in [Channel]
 #[derive(Debug, Clone, PartialEq, Hash)]
-pub struct ChannelMetadata {
+pub struct FileChannel {
     pub prev_addr: FileAddr,
     pub next_addr: FileAddr,
-
     pub data_addr: FileAddr,
-    pub data_count: u32,
+    pub samples: u32,
+    pub channel: Channel,
+}
 
+impl FileChannel {
+    /// Size of a channel header entry in bytes
+    pub(crate) const ENTRY_SIZE: u32 = 124;
+
+    /// Offset of the next addr field from the start of this entry
+    pub(crate) const NEXT_ADDR_OFFSET: u32 = 4;
+
+    /// Offset of the data addr field from the start of this entry
+    pub(crate) const DATA_ADDR_OFFSET: u32 = 8;
+
+    /// Calculates the size in bytes of the data section for this channel
+    pub(crate) fn data_size(&self) -> u32 {
+        self.samples * self.channel.datatype.size() as u32
+    }
+}
+
+/// Metadata about a channel
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct Channel {
     pub datatype: Datatype,
     /// Sample Rate in Hz
     pub sample_rate: u16,
@@ -179,16 +216,6 @@ pub struct ChannelMetadata {
     pub name: String,
     pub short_name: String,
     pub unit: String,
-}
-
-impl ChannelMetadata {
-    /// Size of a metadata entry in bytes
-    pub(crate) const ENTRY_SIZE: u32 = 124;
-
-    /// Calculates the size in bytes of the data section for this channel
-    pub(crate) fn data_size(&self) -> u32 {
-        self.data_count * self.datatype.size() as u32
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Hash)]

@@ -1,5 +1,6 @@
 use crate::{
-    ChannelMetadata, Datatype, Event, FileAddr, Header, I2Error, I2Result, Sample, Vehicle, Venue,
+    Channel, Datatype, Event, FileAddr, FileChannel, Header, I2Error, I2Result, Sample, Vehicle,
+    Venue,
 };
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{Read, Seek, SeekFrom};
@@ -16,6 +17,8 @@ struct AddressTable {
     venue: Option<FileAddr>,
     vehicle: Option<FileAddr>,
 }
+
+// struct
 
 #[derive(Debug)]
 pub struct LDReader<'a, S: Read + Seek> {
@@ -232,7 +235,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
     /// to the next block
     ///
     /// Calls [LDReader::read_header] if it hasn't been called before
-    pub fn read_channels(&mut self) -> I2Result<Vec<ChannelMetadata>> {
+    pub fn read_channels(&mut self) -> I2Result<Vec<FileChannel>> {
         let channel_meta = self.address_table()?.channel_meta;
 
         let mut channels = vec![];
@@ -244,20 +247,20 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
                 return Ok(channels);
             }
 
-            let channel = self.read_channel_metadata(next_ptr)?;
+            let channel = self.read_channel(next_ptr)?;
             next_ptr = channel.next_addr;
             channels.push(channel);
         }
     }
 
-    /// Read the [ChannelMetadata] block at file offset `addr`
-    fn read_channel_metadata(&mut self, addr: FileAddr) -> I2Result<ChannelMetadata> {
+    /// Read the [FileChannel] block at file offset `addr`
+    fn read_channel(&mut self, addr: FileAddr) -> I2Result<FileChannel> {
         self.source.seek(addr.seek())?;
 
         let prev_addr = FileAddr::from(self.source.read_u32::<LittleEndian>()?);
         let next_addr = FileAddr::from(self.source.read_u32::<LittleEndian>()?);
         let data_addr = FileAddr::from(self.source.read_u32::<LittleEndian>()?);
-        let data_count = self.source.read_u32::<LittleEndian>()?;
+        let samples = self.source.read_u32::<LittleEndian>()?;
 
         let _unknown = self.source.read_u16::<LittleEndian>()?;
 
@@ -277,34 +280,36 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
         let unit = self.read_string(12)?;
         let _unknown = self.read_bytes(40)?; // ? (40 bytes for ACC, 32 bytes for acti)
 
-        Ok(ChannelMetadata {
+        Ok(FileChannel {
             prev_addr,
             next_addr,
             data_addr,
-            data_count,
-            datatype,
-            sample_rate,
-            offset,
-            mul,
-            scale,
-            dec_places,
-            name,
-            short_name,
-            unit,
+            samples,
+            channel: Channel {
+                datatype,
+                sample_rate,
+                offset,
+                mul,
+                scale,
+                dec_places,
+                name,
+                short_name,
+                unit,
+            },
         })
     }
 
     // TODO: We should probably have a iterator over channel data
 
     /// Returns a iterator over the channel data
-    pub fn channel_data(&mut self, channel: &ChannelMetadata) -> I2Result<Vec<Sample>> {
-        self.source.seek(channel.data_addr.seek())?;
+    pub fn channel_data(&mut self, fc: &FileChannel) -> I2Result<Vec<Sample>> {
+        self.source.seek(fc.data_addr.seek())?;
 
         // Data for a channel is stored in a contiguous manner at the addr ptr
-        let data = (0..channel.data_count)
+        let data = (0..fc.samples)
             .map(|_| {
                 Ok({
-                    match channel.datatype {
+                    match fc.channel.datatype {
                         Datatype::Beacon16 | Datatype::I16 => {
                             Sample::I16(self.source.read_i16::<LittleEndian>()?)
                         }
@@ -316,7 +321,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
                         Datatype::F32 => Sample::F32(self.source.read_f32::<LittleEndian>()?),
                         Datatype::Invalid => panic!(
                             "Tried to read invalid datatype from channel: {}",
-                            channel.name
+                            fc.channel.name
                         ),
                     }
                 })
@@ -344,7 +349,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 #[cfg(test)]
 mod tests {
     use crate::reader::{AddressTable, FileAddr, LDReader};
-    use crate::{ChannelMetadata, Datatype, Event, Header, Sample, Vehicle, Venue};
+    use crate::{Channel, Datatype, Event, FileChannel, Header, Sample, Vehicle, Venue};
     use std::fs;
     use std::io::Cursor;
 
@@ -402,58 +407,64 @@ mod tests {
         assert_eq!(channels.len(), 78);
         assert_eq!(
             channels[0],
-            ChannelMetadata {
+            FileChannel {
                 prev_addr: FileAddr::from(0u32),
                 next_addr: FileAddr::from(13508u32),
                 data_addr: FileAddr::from(23056u32),
-                data_count: 908,
-                datatype: Datatype::I16,
-                sample_rate: 2,
-                offset: 0,
-                mul: 1,
-                scale: 1,
-                dec_places: 1,
-                name: "Air Temp Inlet".to_owned(),
-                short_name: "Air Tem".to_owned(),
-                unit: "C".to_owned(),
+                samples: 908,
+                channel: Channel {
+                    datatype: Datatype::I16,
+                    sample_rate: 2,
+                    offset: 0,
+                    mul: 1,
+                    scale: 1,
+                    dec_places: 1,
+                    name: "Air Temp Inlet".to_owned(),
+                    short_name: "Air Tem".to_owned(),
+                    unit: "C".to_owned(),
+                }
             }
         );
 
         assert_eq!(
             channels[1],
-            ChannelMetadata {
+            FileChannel {
                 prev_addr: FileAddr::from(13384u32),
                 next_addr: FileAddr::from(13632u32),
                 data_addr: FileAddr::from(24872u32),
-                data_count: 4540,
-                datatype: Datatype::I16,
-                sample_rate: 10,
-                offset: 0,
-                mul: 1,
-                scale: 1,
-                dec_places: 0,
-                name: "Brake Temp FL".to_owned(),
-                short_name: "Brake T".to_owned(),
-                unit: "C".to_owned(),
+                samples: 4540,
+                channel: Channel {
+                    datatype: Datatype::I16,
+                    sample_rate: 10,
+                    offset: 0,
+                    mul: 1,
+                    scale: 1,
+                    dec_places: 0,
+                    name: "Brake Temp FL".to_owned(),
+                    short_name: "Brake T".to_owned(),
+                    unit: "C".to_owned(),
+                }
             }
         );
 
         assert_eq!(
             channels[77],
-            ChannelMetadata {
+            FileChannel {
                 prev_addr: FileAddr::from(22808u32),
                 next_addr: FileAddr::from(0u32),
                 data_addr: FileAddr::from(1189836u32),
-                data_count: 9080,
-                datatype: Datatype::I16,
-                sample_rate: 20,
-                offset: 0,
-                mul: 1,
-                scale: 1,
-                dec_places: 1,
-                name: "Steered Angle".to_owned(),
-                short_name: "Steered".to_owned(),
-                unit: "deg".to_owned(),
+                samples: 9080,
+                channel: Channel {
+                    datatype: Datatype::I16,
+                    sample_rate: 20,
+                    offset: 0,
+                    mul: 1,
+                    scale: 1,
+                    dec_places: 1,
+                    name: "Steered Angle".to_owned(),
+                    short_name: "Steered".to_owned(),
+                    unit: "deg".to_owned(),
+                }
             }
         );
     }
@@ -473,9 +484,9 @@ mod tests {
         let mut reader = LDReader::new(&mut cursor);
 
         let channels = reader.read_channels().unwrap();
-        let channel = &channels[0];
+        let fc = &channels[0];
 
-        let data = reader.channel_data(channel).unwrap();
+        let data = reader.channel_data(fc).unwrap();
         let data: Vec<_> = data.into_iter().take(5).collect();
 
         assert_eq!(
@@ -489,11 +500,11 @@ mod tests {
             ]
         );
 
-        assert_delta!(data[0].decode_f64(channel), 19.9, 0.000001);
-        assert_delta!(data[1].decode_f64(channel), 19.9, 0.000001);
-        assert_delta!(data[2].decode_f64(channel), 20.1, 0.000001);
-        assert_delta!(data[3].decode_f64(channel), 19.9, 0.000001);
-        assert_delta!(data[4].decode_f64(channel), 19.9, 0.000001);
+        assert_delta!(data[0].decode_f64(&fc.channel), 19.9, 0.000001);
+        assert_delta!(data[1].decode_f64(&fc.channel), 19.9, 0.000001);
+        assert_delta!(data[2].decode_f64(&fc.channel), 20.1, 0.000001);
+        assert_delta!(data[3].decode_f64(&fc.channel), 19.9, 0.000001);
+        assert_delta!(data[4].decode_f64(&fc.channel), 19.9, 0.000001);
     }
 
     #[test]

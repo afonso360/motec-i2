@@ -30,14 +30,14 @@ fn main() -> I2Result<()> {
     let channel = &channels[0];
     println!(
         "Reading channel 0: {} ({} samples at {} Hz)",
-        channel.name, channel.data_count, channel.sample_rate
+        channel.channel.name, channel.samples, channel.channel.sample_rate
     );
     println!("Channle: {:#?}", channel);
 
     let data = reader.channel_data(channel)?;
     for i in 0..6 {
         let sample = &data[i];
-        let value = sample.decode_f64(channel);
+        let value = sample.decode_f64(&channel.channel);
         println!("[{}]: {:.1} - (Raw Sample: {:?})", i, value, sample);
     }
 

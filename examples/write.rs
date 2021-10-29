@@ -1,4 +1,4 @@
-use motec_i2::{ChannelMetadata, Datatype, FileAddr, Header, I2Result, LDWriter, Sample};
+use motec_i2::{Channel, Datatype, FileAddr, Header, I2Result, LDWriter, Sample};
 use std::fs::File;
 
 fn main() -> I2Result<()> {
@@ -22,11 +22,7 @@ fn main() -> I2Result<()> {
         short_comment: "second warmup".to_string(),
     })?;
 
-    let channel0_meta = ChannelMetadata {
-        prev_addr: FileAddr::from(0u32),
-        next_addr: FileAddr::from(0u32),
-        data_addr: FileAddr::from(0u32),
-        data_count: 0,
+    let channel0 = Channel {
         datatype: Datatype::I16,
         sample_rate: 2,
         offset: 2,
@@ -37,7 +33,7 @@ fn main() -> I2Result<()> {
         short_name: "Air Tem".to_string(),
         unit: "C".to_string(),
     };
-    let channel0_samples = vec![
+    let channel0_data = vec![
         Sample::I16(190),
         Sample::I16(190),
         Sample::I16(190),
@@ -55,7 +51,10 @@ fn main() -> I2Result<()> {
         Sample::I16(190),
         Sample::I16(190),
     ];
-    let channels = vec![(channel0_meta, channel0_samples)];
-    writer.write_channels(channels)?;
+
+    let id = writer.write_channel(&channel0, &channel0_data)?;
+    writer.write_channel_data(id, &channel0_data)?;
+
+    writer.finish()?;
     Ok(())
 }
