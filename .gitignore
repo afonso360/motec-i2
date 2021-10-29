@@ -1,2 +1,4 @@
+/samples/*.ldx
+/test_samples
 /target
 Cargo.lock
