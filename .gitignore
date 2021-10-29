@@ -1,4 +1,5 @@
 /samples/*.ldx
 /test_samples
 /target
+/test_write.ld
 Cargo.lock
