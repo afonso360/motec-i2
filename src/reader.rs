@@ -222,7 +222,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
 
         let sample_rate = self.source.read_u16::<LittleEndian>()?;
 
-        let shift = self.source.read_u16::<LittleEndian>()?;
+        let offset = self.source.read_u16::<LittleEndian>()?;
         let mul = self.source.read_u16::<LittleEndian>()?;
         let scale = self.source.read_u16::<LittleEndian>()?;
         let dec_places = self.source.read_i16::<LittleEndian>()?;
@@ -239,7 +239,7 @@ impl<'a, S: Read + Seek> LDReader<'a, S> {
             data_count,
             datatype,
             sample_rate,
-            shift,
+            offset,
             mul,
             scale,
             dec_places,
@@ -349,7 +349,7 @@ mod tests {
                 data_count: 908,
                 datatype: Datatype::I16,
                 sample_rate: 2,
-                shift: 0,
+                offset: 0,
                 mul: 1,
                 scale: 1,
                 dec_places: 1,
@@ -368,7 +368,7 @@ mod tests {
                 data_count: 4540,
                 datatype: Datatype::I16,
                 sample_rate: 10,
-                shift: 0,
+                offset: 0,
                 mul: 1,
                 scale: 1,
                 dec_places: 0,
@@ -387,7 +387,7 @@ mod tests {
                 data_count: 9080,
                 datatype: Datatype::I16,
                 sample_rate: 20,
-                shift: 0,
+                offset: 0,
                 mul: 1,
                 scale: 1,
                 dec_places: 1,

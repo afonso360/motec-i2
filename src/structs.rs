@@ -40,9 +40,8 @@ impl Sample {
             Sample::F32(v) => *v as f64,
         };
 
-        // TODO: channel.shift figures into this somewhere... but we don't know what to do with it
-        // Is it a binary shift? or a decimal shift? I'm leaning towards decimal shift, but not sure
-        assert_eq!(channel.shift, 0);
+        // TODO: Offset not yet supported
+        assert_eq!(channel.offset, 0);
         let value = value / channel.scale as f64;
         let value = value * (10.0f64.powi(-channel.dec_places as i32));
         let value = value * channel.mul as f64;
@@ -124,7 +123,7 @@ pub struct ChannelMetadata {
     /// Sample Rate in Hz
     pub sample_rate: u16,
 
-    pub shift: u16,
+    pub offset: u16,
     pub mul: u16,
     pub scale: u16,
     pub dec_places: i16,

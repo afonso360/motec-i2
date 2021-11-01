@@ -104,31 +104,69 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
     }
 
     fn write_channels(&mut self, channels: Vec<(ChannelMetadata, Vec<Sample>)>) -> I2Result<()> {
-        // TODO: Should not be hardcoded
-        self.sink.seek(SeekFrom::Start(0x3448))?;
+        let meta_addrs: Vec<u32> = channels
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                // TODO: Should not be hardcoded
+                let header = 0x3448;
+                let meta_offset = i * ChannelMetadata::ENTRY_SIZE as usize;
+                (header + meta_offset) as u32
+            })
+            .collect();
 
-        for i in 0..channels.len() {
-            let (meta, samples) = &channels[i];
-            let mut meta = meta.clone();
-            let i = i as u32;
+        let sample_byte_sizes: Vec<u32> = channels
+            .iter()
+            .map(|(channel, samples)| {
+                // TODO: ........ dont do this...
+                let mut channel = channel.clone();
+                channel.data_count = samples.len() as u32;
+                channel.data_size()
+            })
+            .collect();
 
-            meta.prev_addr = i * ChannelMetadata::ENTRY_SIZE;
-            meta.next_addr = ((i + 1) % (channels.len() as u32)) * ChannelMetadata::ENTRY_SIZE;
-            meta.data_count = samples.len() as u32;
+        let sample_addrs: Vec<u32> = channels
+            .iter()
+            .enumerate()
+            .map(|(i, (_, _))| {
+                let header = 0x3448;
+                let meta_offset = channels.len() * ChannelMetadata::ENTRY_SIZE as usize;
+                let sample_offset = sample_byte_sizes.iter().take(i).sum::<u32>() as usize;
 
-            let header_offset = 0x3448;
-            let meta_offset = channels.len() as u32 * ChannelMetadata::ENTRY_SIZE;
-            let data_offset: u32 = channels.iter().map(|(c, _)| c.data_size()).sum();
-            meta.data_addr = header_offset + meta_offset + data_offset;
+                (header + meta_offset + sample_offset) as u32
+            })
+            .collect();
 
-            self.write_channel_metadata(&meta)?;
-            self.write_samples(meta.data_addr, samples)?;
+        for (((i, (channel, samples)), meta_addr), sample_addr) in channels
+            .iter()
+            .enumerate()
+            .zip(meta_addrs.iter())
+            .zip(sample_addrs.iter())
+        {
+            let mut channel = channel.clone();
+
+            channel.prev_addr = if i == 0 {
+                None
+            } else {
+                meta_addrs.get(i - 1).copied()
+            }
+            .unwrap_or(0);
+            channel.next_addr = meta_addrs.get(i + 1).copied().unwrap_or(0);
+            channel.data_count = samples.len() as u32;
+            channel.data_addr = *sample_addr;
+            self.write_channel_metadata(*meta_addr, &channel)?;
+        }
+
+        for ((_, samples), sample_addr) in channels.iter().zip(sample_addrs) {
+            self.write_samples(sample_addr, samples)?;
         }
 
         Ok(())
     }
 
-    fn write_channel_metadata(&mut self, channel: &ChannelMetadata) -> I2Result<()> {
+    fn write_channel_metadata(&mut self, addr: u32, channel: &ChannelMetadata) -> I2Result<()> {
+        self.sink.seek(SeekFrom::Start(addr as u64))?;
+
         self.sink.write_u32::<LittleEndian>(channel.prev_addr)?;
         self.sink.write_u32::<LittleEndian>(channel.next_addr)?;
         self.sink.write_u32::<LittleEndian>(channel.data_addr)?;
@@ -144,7 +182,7 @@ impl<'a, S: Write + Seek> LDWriter<'a, S> {
 
         self.sink.write_u16::<LittleEndian>(channel.sample_rate)?;
 
-        self.sink.write_u16::<LittleEndian>(channel.shift)?;
+        self.sink.write_u16::<LittleEndian>(channel.offset)?;
         self.sink.write_u16::<LittleEndian>(channel.mul)?;
         self.sink.write_u16::<LittleEndian>(channel.scale)?;
         self.sink.write_i16::<LittleEndian>(channel.dec_places)?;
@@ -247,8 +285,7 @@ mod tests {
             data_count: 0,
             datatype: Datatype::I16,
             sample_rate: 2,
-            shift: 0,
-            // offset: 0,
+            offset: 0,
             mul: 1,
             scale: 1,
             dec_places: 1,
@@ -294,93 +331,114 @@ mod tests {
         assert_eq!(channel_data[13384..], EXPECTED);
     }
 
-    //
-    // #[test]
-    // fn test_write_channel() {
+    /// When writing multiple channels we have to go back and update the previous channels
+    #[test]
+    fn test_write_multi_channel() {
+        let total_size = 13384 + 132 + 140; // header + 2 channel + samples
+        let bytes: Vec<u8> = iter::repeat(0u8).take(total_size).collect();
+        let mut cursor = Cursor::new(bytes);
 
-    // }
-    //
-    // /// When writing multiple channels we have to go back and update the previous channels
-    // #[test]
-    // fn test_write_multi_channel() {
-    //     let bytes: Vec<u8> = iter::repeat(0u8).take(248).collect();
-    //     let mut cursor = Cursor::new(bytes);
-    //     let mut writer = LDWriter::new(&mut cursor);
-    //
-    //     let channel0 = Channel {
-    //         datatype: Datatype::I16,
-    //         sample_rate: 2,
-    //         offset: 0,
-    //         mul: 1,
-    //         scale: 1,
-    //         dec_places: 1,
-    //         name: "Air Temp Inlet".to_string(),
-    //         short_name: "Air Tem".to_string(),
-    //         unit: "C".to_string(),
-    //     };
-    //     let channel0_samples = vec![];
-    //
-    //     let channel1 = Channel {
-    //         datatype: Datatype::I32,
-    //         sample_rate: 10,
-    //         offset: 1,
-    //         mul: 2,
-    //         scale: 2,
-    //         dec_places: 2,
-    //         name: "Engine temp".to_string(),
-    //         short_name: "EngTemp".to_string(),
-    //         unit: "C".to_string(),
-    //     };
-    //     let channel1_samples = vec![];
-    //
-    //     let c0id = writer.write_channel(&channel0, &channel0_samples).unwrap();
-    //     let c1id = writer.write_channel(&channel1, &channel1_samples).unwrap();
-    //
-    //     writer.write_channel_data(c0id, &channel0_samples).unwrap();
-    //     writer.write_channel_data(c1id, &channel1_samples).unwrap();
-    //
-    //     const EXPECTED: [u8; 248] = [
-    //         // Channel 1
-    //         0x00, 0x00, 0x00, 0x00, // prev_addr
-    //         0x7C, 0x00, 0x00, 0x00, // next_addr
-    //         0xF8, 0x00, 0x00, 0x00, // data_addr
-    //         0x00, 0x00, 0x00, 0x00, // samples
-    //         // Channel
-    //         0x04, 0x00, 0x03, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
-    //         0x01, 0x00, 0x41, 0x69, 0x72, 0x20, 0x54, 0x65, 0x6D, 0x70, 0x20, 0x49, 0x6E, 0x6C,
-    //         0x65, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41, 0x69, 0x72, 0x20, 0x54, 0x65, 0x6D, 0x00,
-    //         0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC9, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Channel end
-    //         // Channel 2
-    //         0x00, 0x00, 0x00, 0x00, // prev_addr
-    //         0x00, 0x00, 0x00, 0x00, // next_addr
-    //         0xF8, 0x00, 0x00, 0x00, // data_addr
-    //         0x00, 0x00, 0x00, 0x00, // samples
-    //         // Channel
-    //         0x04, 0x00, // unk
-    //         0x03, 0x00, // datatype._type
-    //         0x04, 0x00, // datatype.size
-    //         0x0A, 0x00, // sample rate
-    //         0x01, 0x00, // offset
-    //         0x02, 0x00, // mul
-    //         0x02, 0x00, // scale
-    //         0x02, 0x00, // dec_places
-    //         0x45, 0x6E, 0x67, 0x69, 0x6E, 0x65, 0x20, 0x74, 0x65, 0x6D, 0x70, 0x00, 0x00, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, // channel name
-    //         0x45, 0x6E, 0x67, 0x54, 0x65, 0x6D, 0x70, 0x00, // short name
-    //         0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // unit
-    //         // Rest
-    //         0xC9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    //         0x00, // Channel end
-    //     ];
-    //
-    //     let bytes = cursor.into_inner();
-    //     assert_eq!(bytes, EXPECTED);
-    // }
+        let channel0 = ChannelMetadata {
+            prev_addr: 0,
+            next_addr: 0,
+            data_addr: 0,
+            data_count: 0,
+            datatype: Datatype::I16,
+            sample_rate: 2,
+            offset: 0,
+            mul: 1,
+            scale: 1,
+            dec_places: 1,
+            name: "Air Temp Inlet".to_string(),
+            short_name: "Air Tem".to_string(),
+            unit: "C".to_string(),
+        };
+        let channel0_samples = vec![
+            Sample::I16(190),
+            Sample::I16(192),
+            Sample::I16(195),
+            Sample::I16(400),
+        ];
+
+        let channel1 = ChannelMetadata {
+            prev_addr: 0,
+            next_addr: 0,
+            data_addr: 0,
+            data_count: 0,
+            datatype: Datatype::I32,
+            sample_rate: 10,
+            offset: 1,
+            mul: 2,
+            scale: 2,
+            dec_places: 2,
+            name: "Engine temp".to_string(),
+            short_name: "EngTemp".to_string(),
+            unit: "C".to_string(),
+        };
+        let channel1_samples = vec![
+            Sample::I32(387867788),
+            Sample::I32(0),
+            Sample::I32(10),
+            Sample::I32(200),
+        ];
+
+        LDWriter::new(&mut cursor, sample_header())
+            .with_channel(channel0, channel0_samples)
+            .with_channel(channel1, channel1_samples)
+            .write()
+            .unwrap();
+
+        const EXPECTED: [u8; 272] = [
+            // Channel 1
+            0x00, 0x00, 0x00, 0x00, // prev_addr
+            0xC4, 0x34, 0x00, 0x00, // next_addr
+            0x40, 0x35, 0x00, 0x00, // data_addr
+            0x04, 0x00, 0x00, 0x00, // samples
+            // Channel
+            0x04, 0x00, 0x03, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+            0x01, 0x00, 0x41, 0x69, 0x72, 0x20, 0x54, 0x65, 0x6D, 0x70, 0x20, 0x49, 0x6E, 0x6C,
+            0x65, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x41, 0x69, 0x72, 0x20, 0x54, 0x65, 0x6D, 0x00,
+            0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC9, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Channel end
+            // Channel 2
+            0x48, 0x34, 0x00, 0x00, // prev_addr
+            0x00, 0x00, 0x00, 0x00, // next_addr
+            0x48, 0x35, 0x00, 0x00, // data_addr
+            0x04, 0x00, 0x00, 0x00, // samples
+            // Channel
+            0x04, 0x00, // unk
+            0x03, 0x00, // datatype._type
+            0x04, 0x00, // datatype.size
+            0x0A, 0x00, // sample rate
+            0x01, 0x00, // offset
+            0x02, 0x00, // mul
+            0x02, 0x00, // scale
+            0x02, 0x00, // dec_places
+            0x45, 0x6E, 0x67, 0x69, 0x6E, 0x65, 0x20, 0x74, 0x65, 0x6D, 0x70, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, // channel name
+            0x45, 0x6E, 0x67, 0x54, 0x65, 0x6D, 0x70, 0x00, // short name
+            0x43, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // unit
+            // Rest
+            0xC9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, // Channel end
+            // Data Section
+            0xBE, 0x00, // CH1S1
+            0xC0, 0x00, // CH1S2
+            0xC3, 0x00, // CH1S3
+            0x90, 0x01, // CH1S4
+            0x8C, 0x64, 0x1E, 0x17, // CH2S1
+            0x00, 0x00, 0x00, 0x00, // CH2S2
+            0x0A, 0x00, 0x00, 0x00, // CH2S3
+            0xC8, 0x00, 0x00, 0x00, // CH2S4
+        ];
+
+        let channel_data = cursor.into_inner();
+        assert_eq!(channel_data[13384..], EXPECTED);
+    }
 }
