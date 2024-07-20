@@ -1,6 +1,6 @@
 [package]
 name = "motec-i2"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Afonso Bordado <afonsobordado@az8.co>"]
 homepage = "https://github.com/afonso360/motec-i2"
