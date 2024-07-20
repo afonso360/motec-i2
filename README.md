@@ -1,6 +1,6 @@
 # motec-i2
 
-A MoTeC i2 file parser
+A MoTeC i2 file parser and writer
 
 Try the included examples with:
 ```
